@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "repairgate"
-version = "0.1.0"
+version = "0.2.0"
 description = "A test-gated local code repair assistant with protected tests and replayable decisions."
 requires-python = ">=3.11"
 license = "MIT"
