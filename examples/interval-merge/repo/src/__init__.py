@@ -1,0 +1,1 @@
+"""Synthetic interval utility fixture."""

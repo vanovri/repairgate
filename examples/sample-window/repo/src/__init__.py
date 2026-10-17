@@ -1,0 +1,1 @@
+"""Synthetic integer sample fixture."""

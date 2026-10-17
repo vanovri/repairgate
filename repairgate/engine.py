@@ -28,6 +28,10 @@ def snapshot(root: Path) -> dict[str, str]:
     return result
 
 
+def tree_digest(files: dict[str, str]) -> str:
+    return digest(json.dumps(files, sort_keys=True).encode())
+
+
 def validate_changes(changes: dict[str, str], original: Path) -> None:
     if not isinstance(changes, dict) or not 1 <= len(changes) <= 10:
         raise ValueError('A proposal must contain 1 to 10 replacement files.')
@@ -101,14 +105,23 @@ def run_tests(root: Path, directory: str, timeout: int = 10) -> dict:
             proc.wait()
         size = output.tell()
         output.seek(0)
-        log = output.read(32_000).decode('utf-8', errors='replace')
+        if size > 32_000:
+            head = output.read(24_000)
+            output.seek(-8_000, os.SEEK_END)
+            raw_log = head + b'\n[output truncated; first 24 KB and last 8 KB retained]\n' + output.read(8_000)
+        else:
+            raw_log = output.read()
+        # Keep the unittest summary even when many subtests fail. Make exported
+        # traces portable without exposing the machine's temporary directory.
+        log = raw_log.decode('utf-8', errors='replace').replace(str(root), '<verification-copy>')
     # Zero discovered tests must never grant acceptance.
     import re
     match = re.search(r'Ran (\d+) tests?', log)
     count = int(match.group(1)) if match else 0
     return {'passed': proc.returncode == 0 and count > 0 and not timed_out and size <= 1_000_000,
             'tests': count, 'exit_code': proc.returncode, 'timed_out': timed_out,
-            'output_bytes': size, 'log': log, 'duration_ms': round((time.monotonic() - started) * 1000)}
+            'output_bytes': size, 'output_truncated': size > 32_000,
+            'log': log, 'duration_ms': round((time.monotonic() - started) * 1000)}
 
 
 def evaluate(repo: Path, holdout: Path, proposals, *, trust_local_code: bool = False,
@@ -130,9 +143,12 @@ def evaluate(repo: Path, holdout: Path, proposals, *, trust_local_code: bool = F
         raise ValueError('Repository exceeds 500 files or 5 MB. Use a focused stdlib-only fixture.')
     if any(n.startswith('_repairgate_holdout/') for n in before):
         raise ValueError('Reserved holdout directory already exists.')
-    result = {'version': '0.1.0', 'status': 'rejected', 'provider': 'recorded proposals',
-              'source_digest': digest(json.dumps(before, sort_keys=True).encode()),
-              'holdout_digest': digest(json.dumps(holdout_before, sort_keys=True).encode()),
+    protected = {k: v for k, v in before.items() if k.startswith('tests/')}
+    protected.update({'_repairgate_holdout/' + k: v for k, v in holdout_before.items()})
+    result = {'version': '0.2.0', 'status': 'rejected', 'provider': 'recorded proposals',
+              'source_digest': tree_digest(before),
+              'holdout_digest': tree_digest(holdout_before),
+              'protected_tests_digest': tree_digest(protected),
               'attempts': [], 'accepted_changes': None}
     with tempfile.TemporaryDirectory(prefix='repairgate-') as temp:
         base = Path(temp) / 'baseline'
@@ -152,7 +168,8 @@ def evaluate(repo: Path, holdout: Path, proposals, *, trust_local_code: bool = F
             candidate = proposals(index, feedback) if callable(proposals) else (proposals[index] if index < len(proposals) else None)
             if candidate is None:
                 break
-            attempt = {'number': index + 1, 'status': 'rejected', 'reason': '', 'diff': ''}
+            attempt = {'number': index + 1, 'status': 'rejected', 'reason': '', 'diff': '',
+                       'policy_passed': False}
             result['attempts'].append(attempt)
             try:
                 validate_changes(candidate, repo)
@@ -160,9 +177,17 @@ def evaluate(repo: Path, holdout: Path, proposals, *, trust_local_code: bool = F
                 attempt['reason'] = str(exc)
                 feedback = str(exc)
                 continue
+            attempt['policy_passed'] = True
             working = Path(temp) / f'attempt-{index + 1}'
             shutil.copytree(repo, working, ignore=shutil.ignore_patterns('.git', '__pycache__', '.venv'))
             shutil.copytree(holdout, working / '_repairgate_holdout')
+            start = snapshot(working)
+            starting_source = {k: v for k, v in start.items() if not k.startswith('_repairgate_holdout/')}
+            if starting_source != before or start != baseline_expected:
+                raise ValueError('Source or tests changed before candidate verification.')
+            attempt['starting_source_digest'] = tree_digest(starting_source)
+            attempt['protected_tests_before_digest'] = tree_digest(protected)
+            attempt['proposal_digest'] = digest(json.dumps(candidate, sort_keys=True).encode())
             diff = []
             expected = dict(baseline_expected)
             for name, content in candidate.items():
@@ -173,7 +198,13 @@ def evaluate(repo: Path, holdout: Path, proposals, *, trust_local_code: bool = F
             attempt['diff'] = ''.join(diff)
             attempt['visible'] = run_tests(working, 'tests', timeout)
             attempt['holdout'] = run_tests(working, '_repairgate_holdout', timeout)
-            attempt['integrity_passed'] = snapshot(working) == expected
+            verified = snapshot(working)
+            verified_protected = {k: v for k, v in verified.items()
+                                  if k.startswith(('tests/', '_repairgate_holdout/'))}
+            attempt['protected_tests_after_digest'] = tree_digest(verified_protected)
+            attempt['protected_tests_unchanged'] = verified_protected == protected
+            attempt['verified_tree_digest'] = tree_digest(verified)
+            attempt['integrity_passed'] = verified == expected
             if not attempt['integrity_passed']:
                 attempt['reason'] = 'Files changed during verification.'
             elif not attempt['visible']['passed']:
