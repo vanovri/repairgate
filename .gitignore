@@ -8,3 +8,6 @@ frontend/dist/
 private/
 *-report.json
 application-review.*
+
+graphify-out/
+
