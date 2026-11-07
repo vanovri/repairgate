@@ -1,6 +1,6 @@
 # Architecture: repairgate
 
-Reviewed on 2026-11-07 against the local working tree (`C:/Users/ardhy/Projects/repairgate`). `graphify-out/graph.json` provides the local AST symbol graph.
+Reviewed on 2026-11-08 against the local working tree (`C:/Users/ardhy/Projects/repairgate`). `graphify-out/graph.json` provides the local AST symbol graph.
 
 ## 1. System Context & Data Flow
 
@@ -69,3 +69,7 @@ Set-Location 'C:\Users\ardhy\Projects\repairgate'
 ## 6. Integration Boundaries
 
 AST allowlist and temporary workspace copies enforce pure-function benchmark rules on trusted local code; they are not an OS container sandbox for untrusted code.
+
+## Source crosscheck, 2026-11-08
+
+The API currently uses one process-local lock for all demo cases. Candidate verification still checks the freshly copied tree against the expected baseline before applying changes. No integrity shortcut is implemented by this documentation review.

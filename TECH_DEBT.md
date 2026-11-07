@@ -1,16 +1,17 @@
-# Technical Debt & Performance Ledger: repairgate
+# repairgate: performance and technical debt
 
-Reviewed on 2026-11-07 against the current working tree on disk. All line numbers are 1-based and verified directly against the current production files. Every diff below is a non-destructive engineering proposal, not an applied production edit.
+Source crosscheck: 2026-11-08 WIB. Locations refer to the current production files. The unified diffs below are proposals only. Production code has not been changed. No elapsed-time improvement is claimed without measurement.
 
-## TD-01 — Skip spawning holdout `unittest` subprocess when visible tests already failed
+## 1. Skip a second test interpreter after visible verification fails
 
-- **Location**: `repairgate/engine.py:534-535`
-- **Analysis**: `_verify_candidate_attempt` unconditionally spawns a second Python interpreter subprocess for `_repairgate_holdout` even when `attempt['visible']['passed']` is `False`, doubling subprocess startup and discovery latency (or timeout wait) on visibly broken candidates.
+Location: repairgate/engine.py:534-536.
+
+Every candidate starts both visible and holdout subprocesses. A failed visible suite already prevents acceptance. Skipping the holdout can reduce wasted process startup or timeout latency while preserving the integrity audit and rejected status. The tradeoff is losing holdout diagnostics for visibly broken candidates.
 
 ```diff
 --- a/repairgate/engine.py
 +++ b/repairgate/engine.py
-@@ -532,7 +532,19 @@
+@@ -532,7 +532,14 @@
      diff_text, expected = _apply_candidate_changes(repo, working, candidate, baseline_expected)
      attempt["diff"] = diff_text
      attempt["visible"] = run_tests(working, "tests", timeout)
@@ -19,50 +20,21 @@ Reviewed on 2026-11-07 against the current working tree on disk. All line number
 +        attempt["holdout"] = run_tests(working, "_repairgate_holdout", timeout)
 +    else:
 +        attempt["holdout"] = {
-+            "passed": False,
-+            "tests": 0,
-+            "exit_code": None,
-+            "timed_out": False,
-+            "output_bytes": 0,
-+            "output_truncated": False,
-+            "log": "Skipped holdout suite because visible tests failed.",
-+            "duration_ms": 0,
++            "passed": False, "tests": 0, "exit_code": None,
++            "timed_out": False, "output_bytes": 0, "output_truncated": False,
++            "log": "Skipped because visible verification failed.", "duration_ms": 0,
 +        }
      _audit_attempt_outcome(attempt, working, protected, expected)
      return attempt
 ```
 
-- **Validation**: Verify UI/test consumers tolerate `exit_code=None, tests=0` on skipped holdout runs and run `.\.venv\Scripts\python.exe -m pytest -q`.
+Validation: Count run_tests calls for visible failure/success and confirm rejected attempts still run _audit_attempt_outcome. Check report/UI handling of a skipped holdout before adoption.
 
-## TD-02 — Copy pre-verified baseline directory instead of re-copying two trees and re-hashing `start` per attempt
+## 2. Allow independent demo cases to acquire separate verification locks
 
-- **Location**: `repairgate/engine.py:523-527`
-- **Analysis**: `_verify_candidate_attempt` walks and SHA-256 hashes the newly copied `working` directory (`start = snapshot(working)`) and filters `starting_source` on every attempt, then hashes `working` again in `_audit_attempt_outcome`. Cloning from the already-verified clean baseline copy (or checking source hashes only when needed) avoids redundant full-tree I/O.
+Location: repairgate/api.py:19, repairgate/api.py:32-40.
 
-```diff
---- a/repairgate/engine.py
-+++ b/repairgate/engine.py
-@@ -521,10 +521,9 @@
- 
-     attempt["policy_passed"] = True
-     _copy_verification_workspace(repo, holdout, working)
--    start = snapshot(working)
--    starting_source = {k: v for k, v in start.items() if not k.startswith("_repairgate_holdout/")}
--    if starting_source != before or start != baseline_expected:
-+    if snapshot(repo) != before or snapshot(holdout) != holdout_before:
-         raise ValueError("Source or tests changed before candidate verification.")
-+    starting_source = before
- 
-     attempt["starting_source_digest"] = tree_digest(starting_source)
-     attempt["protected_tests_before_digest"] = tree_digest(protected)
-```
-
-- **Validation**: Pass `holdout_before` into `_verify_candidate_attempt` (or clone a clean read-only staging snapshot) and run `.\.venv\Scripts\python.exe -m pytest -q`.
-
-## TD-03 — Use per-case locks instead of a single global `threading.Lock` in `/api/demo`
-
-- **Location**: `repairgate/api.py:19`
-- **Analysis**: A single process-wide `lock` rejects concurrent `/api/demo` requests for distinct bundled cases (`bill-splitter` vs `interval-merge`) with HTTP 429 even though `evaluate()` runs each case inside its own `TemporaryDirectory`.
+The single process-wide lock rejects simultaneous requests even for different bundled cases. Each run uses its own temporary verification workspace. A lock per known case permits bounded parallel work across cases. This intentionally raises peak CPU/process usage and still does not coordinate multiple server processes.
 
 ```diff
 --- a/repairgate/api.py
@@ -72,10 +44,31 @@ Reviewed on 2026-11-07 against the current working tree on disk. All line number
  
  app = FastAPI(title="RepairGate", docs_url=None, redoc_url=None)
 -lock = threading.Lock()
-+locks: dict[str, threading.Lock] = {case_id: threading.Lock() for case_id in CASES}
++locks = {case_id: threading.Lock() for case_id in CASES}
  
  
  @app.get("/api/health")
+@@ -31,13 +31,14 @@
+ 
+ @app.post("/api/demo")
+ def run_demo(case_id: CaseId = "bill-splitter") -> EvaluationReport:
+-    if not lock.acquire(blocking=False):
++    case_lock = locks[case_id]
++    if not case_lock.acquire(blocking=False):
+         logger.warning("Rejected concurrent /api/demo request for case '%s'", case_id)
+         raise HTTPException(429, "A verification is already running.")
+     try:
+         return run_case(case_id)
+     finally:
+-        lock.release()
++        case_lock.release()
+ 
+ 
+ def mount_frontend_if_present(target_app: FastAPI, dist_dir: Path) -> bool:
 ```
 
-- **Validation**: Acquire `locks[case_id]` in `run_demo` while retaining global `lock` alias or updating `test_cli_and_api.py` lock-contention tests.
+Validation: Test same-case contention, different-case concurrency and release on exceptions. Update callers/tests that import the old lock symbol. Profile resource limits before enabling more parallel verification.
+
+## Crosscheck decisions
+
+The previous snapshot optimization referenced undefined holdout_before and weakened the copied-workspace integrity gate. It has been withdrawn. Keep start != baseline_expected and all protected-source audits intact.
