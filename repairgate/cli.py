@@ -100,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(json.dumps({"status": result["status"], **summary, "report": str(args.output)}))
     if args.command == "lab" and result["status"] != "passed":
         raise SystemExit(1)
-    if args.command == "repair" and result["status"] != "accepted":
+    if args.command == "repair" and result["status"] not in {"accepted", "no_repair_needed"}:
         raise SystemExit(1)
 
 
