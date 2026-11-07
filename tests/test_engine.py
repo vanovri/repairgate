@@ -1,11 +1,12 @@
-import json
-from pathlib import Path
 import shutil
+
 import pytest
 from fastapi.testclient import TestClient
-from repairgate.demo import ROOT, demo
-from repairgate.engine import evaluate, snapshot, validate_changes, validate_source
+
 from repairgate.api import app
+from repairgate.demo import ROOT, demo
+from repairgate.engine import evaluate, validate_changes, validate_source
+
 
 def test_repair_gate_rejects_cheating_and_overfit():
     report = demo()

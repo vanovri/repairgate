@@ -1,8 +1,9 @@
 import io
 import json
-import pytest
+
 from repairgate.demo import ROOT
-from repairgate.engine import ollama_proposer, evaluate
+from repairgate.engine import evaluate, ollama_proposer
+
 
 def test_ollama_receives_visible_feedback_only(monkeypatch):
     calls=[]
