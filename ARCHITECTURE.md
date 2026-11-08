@@ -1,6 +1,6 @@
 # Architecture: repairgate
 
-Reviewed on 2026-11-08 against the local working tree (`C:/Users/ardhy/Projects/repairgate`). `graphify-out/graph.json` provides the local AST symbol graph.
+Reviewed on 2026-11-08 against the local working tree (`.`). `graphify-out/graph.json` provides the local AST symbol graph.
 
 ## 1. System Context & Data Flow
 
@@ -62,8 +62,7 @@ Candidate files are written exclusively inside `TemporaryDirectory(prefix='repai
 ## 5. Verification Commands
 
 ```powershell
-Set-Location 'C:\Users\ardhy\Projects\repairgate'
-& '.\.venv\Scripts\python.exe' -m pytest -q
+Set-Location 'python' -m pytest -q
 ```
 
 ## 6. Integration Boundaries

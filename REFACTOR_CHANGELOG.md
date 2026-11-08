@@ -89,8 +89,8 @@
 .\.venv\Scripts\python.exe -m pytest --cov=repairgate --cov-report=term-missing
 
 # 2. Ruff Linter -> Exit Code: 0 (All checks passed!)
-C:\Users\ardhy\.gemini\antigravity\brain\7b19fb5e-cc47-425f-9713-ee64d56c8136\scratch\qa-tools\qa-venv\Scripts\ruff.exe check repairgate tests
+ruff check repairgate tests
 
 # 3. Mypy Static Type Checker -> Exit Code: 0 (Success: no issues found in 6 source files)
-C:\Users\ardhy\.gemini\antigravity\brain\7b19fb5e-cc47-425f-9713-ee64d56c8136\scratch\qa-tools\qa-venv\Scripts\mypy.exe repairgate --ignore-missing-imports
+mypy repairgate --ignore-missing-imports
 ```

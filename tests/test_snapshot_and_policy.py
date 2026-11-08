@@ -168,4 +168,4 @@ def test_validate_source_accepts_docstrings_constants_and_sibling_calls() -> Non
         "def compute(n):\n"
         "    return sum(helper(i, step=2) for i in range(n))\n"
     )
-    validate_source(valid_code)
+    assert validate_source(valid_code) is None

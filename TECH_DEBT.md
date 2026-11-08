@@ -9,9 +9,10 @@ Location: repairgate/engine.py:534-536.
 Every candidate starts both visible and holdout subprocesses. A failed visible suite already prevents acceptance. Skipping the holdout can reduce wasted process startup or timeout latency while preserving the integrity audit and rejected status. The tradeoff is losing holdout diagnostics for visibly broken candidates.
 
 ```diff
+diff --git a/repairgate/engine.py b/repairgate/engine.py
 --- a/repairgate/engine.py
 +++ b/repairgate/engine.py
-@@ -532,7 +532,14 @@
+@@ -532,6 +532,13 @@
      diff_text, expected = _apply_candidate_changes(repo, working, candidate, baseline_expected)
      attempt["diff"] = diff_text
      attempt["visible"] = run_tests(working, "tests", timeout)
@@ -37,6 +38,7 @@ Location: repairgate/api.py:19, repairgate/api.py:32-40.
 The single process-wide lock rejects simultaneous requests even for different bundled cases. Each run uses its own temporary verification workspace. A lock per known case permits bounded parallel work across cases. This intentionally raises peak CPU/process usage and still does not coordinate multiple server processes.
 
 ```diff
+diff --git a/repairgate/api.py b/repairgate/api.py
 --- a/repairgate/api.py
 +++ b/repairgate/api.py
 @@ -16,7 +16,7 @@
